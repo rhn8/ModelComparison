@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "testapp": {
+    "ModelComparison": {
       "projectType": "application",
       "schematics": {},
       "root": "",
@@ -13,7 +13,7 @@
         "build": {
           "builder": "@angular-devkit/build-angular:application",
           "options": {
-            "outputPath": "dist/testapp",
+            "outputPath": "dist/ModelComparison",
             "index": "src/index.html",
             "browser": "src/main.ts",
             "polyfills": [
@@ -59,10 +59,10 @@
           "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "testapp:build:production"
+              "buildTarget": "ModelComparison:build:production"
             },
             "development": {
-              "buildTarget": "testapp:build:development"
+              "buildTarget": "ModelComparison:build:development"
             }
           },
           "defaultConfiguration": "development"
