@@ -1,33 +1,29 @@
-import { Component } from '@angular/core';
+import { Component, ViewChild } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { HeaderComponent } from "./header/header.component";
 import { CommonModule } from '@angular/common';
-
+import { ModelResultsComponent } from './model-results/model-results.component';
+import { ImageInputComponent } from "./image-input/image-input.component";
+import { MutlipleImageInputComponent } from './mutliple-image-input/mutliple-image-input.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, HeaderComponent, CommonModule],
+  imports: [RouterOutlet, HeaderComponent, CommonModule, ModelResultsComponent, ImageInputComponent,MutlipleImageInputComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css'
 })
 export class AppComponent {
+
   title = 'ModelComparison';
-  file:any;
-  imageSrc: string | ArrayBuffer | null = null;
 
-  onChangeFile(event: any){
-    this.file = event.target.files[0];
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      this.imageSrc = reader.result;
-       // Set the image source to the file data
-    };
-
-    reader.readAsDataURL(this.file); // Convert the file to a data URL
+  @ViewChild(ModelResultsComponent) resultsComponent: ModelResultsComponent;
 
 
+  recieveData(data){
+    this.resultsComponent.update(data[0],data[1],data[2])
   }
+  
+  
 }
 
