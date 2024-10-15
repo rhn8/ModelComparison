@@ -1,0 +1,7 @@
+.scroll-container{
+    width: auto; /* Adjust width as needed */
+    height: auto; /* Adjust height as needed */
+    
+    border: 1px solid #ccc;
+    padding: 10px;
+}

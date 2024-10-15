@@ -1,7 +1,10 @@
- import { createSegmenter, SupportedModels, blurBodyPart } from '@tensorflow-models/body-segmentation';
+ import { createSegmenter, SupportedModels, blurBodyPart , toBinaryMask} from '@tensorflow-models/body-segmentation';
  import { createDetector, SupportedModels as PoseModels } from '@tensorflow-models/pose-detection';
  import { skinDetection } from './skinDetect.js';
+import {imageDataRGBA} from "stackblur-canvas"
  var initialRuns = [true,true,true] // check if its the first run of the models: [BodyPix,MediaPipe,BodyPose]
+
+ 
 const estimationConfig = {
   maxPoses: 20,
   flipHorizontal: false,
@@ -24,7 +27,7 @@ const estimationConfig = {
     }
   }
 
-async function MediaPipeSegmenter() {
+async function mediaPipeSegmenter() {
   // generates the MediaPipe segmenter object for inference
 
     initializeTensorFlow()
@@ -33,9 +36,10 @@ async function MediaPipeSegmenter() {
         runtime: 'mediapipe', // or 'tfjs'
         solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation',
         modelType: 'general',
-        outputStride: 16,
-        quantBytes: 2,
-        multiplier: 0.75
+        architecture: 'ResNet50',
+        outputStride: 32,
+        quantBytes: 4,
+        multiplier: 1.0
         };
 
     const segmenter = await createSegmenter(model, segmenterConfig)
@@ -44,17 +48,22 @@ async function MediaPipeSegmenter() {
 }
 
 
-async function BodyPixSegmenter(){
+async function bodyPixSegmenter(){
     // generates the BodyPix segmenter object for inference
 
     initializeTensorFlow()
 
     const model = SupportedModels.BodyPix
     const segmenterConfig = {
-        runtime: 'tfjs',
+        architecture: 'ResNet50',
         solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation',
         modelType: 'general',
-    }
+        outputStride: 32,
+        quantBytes: 4,
+        multiplier: 1.0
+        };
+
+
 
     const segmenter = await createSegmenter(model, segmenterConfig)
 
@@ -62,41 +71,68 @@ async function BodyPixSegmenter(){
     return segmenter
 }
 
+async function bodyPoseDetector(){
+  //Generates the BodyPose detector for inference
+  const detectorConfig = {
+    architecture: 'MobileNetV1',
+    outputStride: 16,
+    inputResolution: { width: 600, height: 400 },
+    multiplier: 0.75
+  };
+
+  const detector = await createDetector(PoseModels.PoseNet, detectorConfig);
+  return detector
+
+  
+}
+
+
+
+/** 
+   *  Blurs any skin being shown on the body other than the face for
+   *  every image.
+   * 
+   *  Applys BodyPix model to a given image to obtain a mask 
+   * and applies blurring by filtering the mask with a skin detection
+   * algorithm, blurring pixels which fall within the intersections of
+   * the two masks.
+   * 
+   * @returns A list of the inference times for each image
+*/
 export async function bodyPixInference(){
 
-  if (initialRuns[0]){
-    // Prepares the model to be cached
-    initialRuns[0] = false
-    s = await BodyPixSegmenter()
-    _ = await s.segmentPeople(new Image(),{multiSegmentation: false, segmentBodyParts: true});
-  }
+  checkInitialRuns(0)
 
     initializeTensorFlow()
     const images = document.querySelectorAll("img");
-    console.log(images)
 
     var imageArray = Array.from(images)
 
     var res= await Promise.all(imageArray.map(async (img) => {
 
-        var s = performance.now()
+    var s = performance.now()
     
-    const segmenter = await BodyPixSegmenter()
+    const segmenter = await bodyPixSegmenter()
+
     
     const h = img.height;
     const w = img.width;
-
+    
     img.width = 600;
     img.height = h/w * img.width;
 
-    const people = await segmenter.segmentPeople(img,{multiSegmentation: false, segmentBodyParts: true});
+    
+
+    const people = await segmenter.segmentPeople(img,{multiSegmentation: false, segmentBodyParts: true,maxDetections:20});
 
     
     await applyBlurring(img,people,h,w)
+
+    
+
     var end = performance.now();
 
     var result = end - s
-    console.log(result)
     return result
     }))
 
@@ -110,62 +146,22 @@ export async function bodyPixInference(){
 
 }
 
-async function applyBlurring(img,people,h,w){
-  // applys blurring on a HTML image element using the segmentation obtained from MediaPipe/BodyPix
-  const foregroundThreshold = 0.5;
-    const backgroundBlurAmount = 10;
-    const edgeBlurAmount = 10;
-    const flipHorizontal = false;
-    const faceBodyPartIdsToBlur = [0, 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18];
-
-    const canvas = document.createElement("canvas");
-    canvas.width = img.width;
-    canvas.height = img.height;
-    
-    await blurBodyPart(
-      canvas, img, people, faceBodyPartIdsToBlur, foregroundThreshold,
-      backgroundBlurAmount, edgeBlurAmount, flipHorizontal);
-    
-    var dataURL = canvas.toDataURL();
-    img.height = h
-    img.width = w
-    img.src = dataURL
-
-}
-
-
-
-function drawKeypoints(keypoints,ctx) {
-// Draws the keypoints of a detected person
-  ctx.fillStyle = 'Green';
-  ctx.strokeStyle = 'White';
-  ctx.lineWidth = 2;
-  for(let i=0; i<keypoints.length; i++) {
-      drawKeypoint(keypoints[i],ctx);    
-  }
-}
-
-function drawKeypoint(keypoint,ctx) {
-  //Draws a keypoint onto a canvas contex as long as it's not a part of the face.
-
-  const faceParts = ['nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear']
-  const scoreThreshold = 0.1
-  const radius = 4;
-
-  if (keypoint.score >= scoreThreshold & !faceParts.includes(keypoint.name)) {
-    console.log(keypoint)
-    const circle = new Path2D();
-    circle.arc(keypoint.x, keypoint.y, radius, 0, 2 * Math.PI);
-    ctx.fill(circle);
-    ctx.stroke(circle);
-  }
-}
-
+/**
+ * Blocks out skin being shown on the body besides the face using
+ * a bounding box 
+ * 
+ * Applys BodyPose model to a given image to obtain keypoints,
+ * drawing a bounding box based on the positions of the shoulders and
+ * knees, and applies skin detection blurring to pixels within the 
+ * bounding box region.
+ * 
+ * @returns A list of the inference times for each image
+ *
+ */
 export async function bodyPoseInference(){
 //Runs BodyPose inference on a given uploaded image.
 
   initializeTensorFlow()
-
   
   const detector = await bodyPoseDetector()
 
@@ -173,16 +169,11 @@ export async function bodyPoseInference(){
 
   var imageArray = Array.from(images)
 
-
   var res= await Promise.all(imageArray.map(async (img) => {
 
-    if (initialRuns[2]){
-      initialRuns[2] = false
-      _ = await createDetector()
-      _ = await detector.estimatePoses(img,estimationConfig)
-    }
-    const s = performance.now()
+    await checkInitialRuns(2)
 
+    const s = performance.now()
 
     const poses = await detector.estimatePoses(img,estimationConfig);
 
@@ -195,38 +186,19 @@ export async function bodyPoseInference(){
     const octx = canvas.getContext('2d');
     
 
-
-
       // Draw the image onto the canvas
     octx.drawImage(img, 0, 0, img.width, img.height);
 
-    for (const pose of poses){
-      const keypoints = pose.keypoints
-      if (pose.keypoints != null) {
-        // Obtain the width and height of the rectangle formed between the left shoulder and right thigh keypoints
-        const w = Math.round(Math.abs(keypoints[6].x-keypoints[13].x))
-        const h =Math.round(Math.abs(keypoints[6].y-keypoints[13].y))
-
-
-        drawKeypoints(pose.keypoints,octx);
-
-        const imgData = octx.getImageData(Math.round(keypoints[6].x),Math.round(keypoints[6].y)  ,w*1.25, h*1.25)
-        var mask = skinDetection(imgData)
-        console.log(mask)
-        var idata = new ImageData(mask,w*1.25,h*1.25)
-        octx.putImageData(idata,Math.round(keypoints[6].x),Math.round(keypoints[6].y) )
-        
-      }
-    }
+    drawPoses(poses, octx)
 
     octx.restore();
 
     var dataURL = canvas.toDataURL();
     img.src = dataURL
     
-
     const end = performance.now()
     const result = end - s
+
     return result
   }))
   return new Promise((resolve)=>{
@@ -234,25 +206,32 @@ export async function bodyPoseInference(){
 
 }
 
-
+/**
+ * Blurs out the background of a person inside an image
+ * 
+ * Applys MediaPipeSelfieSegmenter to every image, and 
+ * given the mask obtained, blurs out every pixel 
+ * highlighted within the mask.
+ * 
+ * @returns A list of the inference times for each image
+ */
 export async function mediaPipeInference(){
 // Performs inference using MediePipeSelfieSegmentation model
-  if (initialRuns[1]){
-    initialRuns[1] = false
-    const s = await MediaPipeSegmenter()
-    _ = await s.segmentPeople(new Image(),{multiSegmentation: false, segmentBodyParts: true});
-  }
+
   initializeTensorFlow()
+
+  checkInitialRuns(1)
+
   const images = document.querySelectorAll("img");
-  console.log(images)
 
   var imageArray = Array.from(images)
 
   var res= await Promise.all(imageArray.map(async (img) => {
 
+
   var s = performance.now()
   
-  const segmenter = await MediaPipeSegmenter()
+  const segmenter = await mediaPipeSegmenter()
 
   
   const h = img.height;
@@ -273,7 +252,6 @@ export async function mediaPipeInference(){
   }))
 
 
-
   return new Promise((resolve)=>{
     resolve(res[0])
 
@@ -281,39 +259,123 @@ export async function mediaPipeInference(){
 
 
 }
-
-export async function multiInference(imageArray){
+/**
+ * Given a list of ImageData objects, draws the image and applies
+ * BodyPix model to each image and for each person, blurs any region
+ * showing skin besides faces.
+ * 
+ * @param {*} imageArray An array of ImageData Objects
+ * @returns A list of the inference times for each ImageData
+ */
+export async function multiInference(imageArray) {
   // Runs multiple image inference using BodyPix
-  initializeTensorFlow()
-  var timings = []
+  console.log("Initializing TensorFlow...");
+  initializeTensorFlow();
+
+  var timings = [];
+  const segmenter = await bodyPixSegmenter();
+  console.log("Segmenter initialized:", segmenter);
+
+  let count = 0;
+
+  for (const image of imageArray) {
+    console.log(`Processing image ${count + 1} out of ${imageArray.length}`);
+
+    const row = document.getElementById(`${count}`);
+    count += 1;
+    const cell = document.createElement('td');
 
 
-  const segmenter = await BodyPixSegmenter()
+    // const img = document.createElement('img');
+    // const canvas = document.createElement('canvas');
+    // const ctx = canvas.getContext('2d');
+
+    // canvas.height = image.height;
+    // canvas.width = image.width;
+
+    // ctx.putImageData(image, 0, 0);
+    // const dataURL = canvas.toDataURL();
+    // img.src = dataURL;
 
 
-  for (const image of imageArray){
-    const start = performance.now()
+    const [ctx, img] =  loadContext()
 
-    const people = await segmenter.segmentPeople(image,{multiSegmentation: false, segmentBodyParts: true});
 
-    const end = performance.now()
-    timings.push(end - start)
+    const h = img.height;
+    const w = img.width;
 
+    // Optionally scale the image, if needed
+    // img.width = 600;
+    // img.height = h/w * img.width;
+
+    cell.appendChild(img);
+    row.appendChild(cell);
+
+    try {
+      const start = performance.now();
+
+      // Run inference on the image
+      const people = await segmenter.segmentPeople(canvas, { multiSegmentation: false, segmentBodyParts: true });
+
+      // Extract the image data
+      // const imgData = await people[0].mask.toImageData();
+
+      await applyBlurring(img, people, h, w);
+
+      const end = performance.now();
+      timings.push(end - start);
+    } catch (error) {
+      console.error(`Error processing image ${count}:`, error);
+    }
   }
-  return await timings.slice(1)
+
+  return await timings.slice(1);
 }
 
+
+/**
+ * Given a list of ImageData objects, draws the image and applies
+ * BodyPose model to each image and blurs every pixel showing skin
+ * between the shoulders and knees.
+ * 
+ * @param {*} imageArray An array of ImageData Objects
+ * @returns A list of the inference times for each ImageData
+ */
 export async function multiBodyPose(imageArray){
   // runs inference for the BodyPose model on multiple images
   initializeTensorFlow()
   var timings = []
 
   const detector = await bodyPoseDetector()
+  let count = 0;
 
   for (const image of imageArray){
+
+    const row = document.getElementById(`${count}`);
+    count += 1;
+    const cell = document.createElement('td');
+
+
+
+    const [ctx, img] =  loadContext()
+
+
+    cell.appendChild(img);
+    row.appendChild(cell);
+
+
     const start =performance.now()
 
-    const poses = detector.estimatePoses(image,estimationConfig)
+    const poses = await detector.estimatePoses(image,estimationConfig)
+
+    drawPoses(poses,ctx)
+
+    ctx.restore();
+
+    var dataURL2 = canvas.toDataURL();
+
+    img.src = dataURL2
+
     const end = performance.now()
     timings.push(end - start)
 
@@ -323,16 +385,183 @@ export async function multiBodyPose(imageArray){
 
 }
 
-async function bodyPoseDetector(){
-  const detectorConfig = {
-    architecture: 'MobileNetV1',
-    outputStride: 16,
-    inputResolution: { width: 600, height: 400 },
-    multiplier: 0.75
+
+
+function drawPoses(poses,octx){
+
+  for (const pose of poses){
+    const keypoints = pose.keypoints
+    if (pose.keypoints != null) {
+      // Obtain the width and height of the rectangle formed between the left shoulder and right thigh keypoints
+      const w = Math.round(Math.abs(keypoints[6].x-keypoints[13].x))
+      const h =Math.round(Math.abs(keypoints[6].y-keypoints[13].y))
+
+
+      drawKeypoints(pose.keypoints,octx);
+
+      const imgData = octx.getImageData(Math.round(keypoints[6].x),Math.round(keypoints[6].y)  ,w*1.25, h*1.25)
+      var mask = skinDetection(imgData)
+      var idata = new ImageData(mask,w*1.25,h*1.25)
+      octx.putImageData(idata,Math.round(keypoints[6].x),Math.round(keypoints[6].y) )
+
+      drawConnections(pose.keypoints, octx)
+
+      
+    }
+  }
+
+
+}
+
+async function checkInitialRuns(n){
+
+  if (initialRuns[n]){
+    initialRuns[n] = false
+    _ = await createDetector()
+    _ = await detector.estimatePoses(img,estimationConfig)
+  }
+
+
+
+}
+
+function loadContext(){
+
+  const img = document.createElement('img');
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  canvas.height = image.height;
+  canvas.width = image.width;
+
+  ctx.putImageData(image, 0, 0);
+  const dataURL = canvas.toDataURL();
+  img.src = dataURL;
+
+  return [ctx, img]
+
+
+
+}
+
+function drawConnections(keypoints,ctx){
+  const pointConnections = {
+    5: 6,
+    6: 12,
+    7: 5,
+    8: 6,
+    9: 7,
+    10: 8,
+    11: 5,
+    12: 11,
+    13: 11,
+    14: 12,
+    15: 13,
+    16: 14
   };
 
-  const detector = await createDetector(PoseModels.PoseNet, detectorConfig);
-  return detector
+  for (let i=5; i < keypoints.length; i++){
+    ctx.strokeStyle = 'red'
 
+    const line = new Path2D();
+    line.moveTo(keypoints[i].x,keypoints[i].y)
+
+    var j = pointConnections[i]
+
+    line.lineTo(keypoints[j].x,keypoints[j].y)
+    ctx.lineWidth = 20
+    ctx.stroke(line)
+  }
+}
+
+function drawKeypoints(keypoints,ctx) {
+// Draws the keypoints of a detected person
+  ctx.fillStyle = 'Green';
+  ctx.strokeStyle = 'White';
+  ctx.lineWidth = 2;
+  for(let i=0; i<keypoints.length; i++) {
+      drawKeypoint(keypoints[i],ctx);    
+  }
+
+
+
+}
+
+
+function drawKeypoint(keypoint,ctx) {
+  //Draws a keypoint onto a canvas contex as long as it's not a part of the face.
+
+  const faceParts = ['nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear']
+  const scoreThreshold = 0.1
+  const radius = 4;
+
+  if (keypoint.score >= scoreThreshold & !faceParts.includes(keypoint.name)) {
+    const circle = new Path2D();
+    circle.arc(keypoint.x, keypoint.y, radius, 0, 2 * Math.PI);
+    ctx.fill(circle);
+    ctx.stroke(circle);
+  }
+}
+
+async function applyBlurring(img, people, h, w) {
   
+  // Get segmentation mask from people
+  var mask = await people[0].mask.toImageData();
+  var maskdata = mask.data;
+
+  // Create a canvas with the correct image dimensions
+  const ocanvas = document.createElement("canvas");
+  const octx = ocanvas.getContext("2d");
+
+  // Set canvas dimensions to match the original image dimensions (h, w)
+  ocanvas.width = w;
+  ocanvas.height = h;
+
+
+  // Draw the image at the original size
+  octx.drawImage(img, 0, 0, ocanvas.width, ocanvas.height);
+
+  const odata = octx.getImageData(0, 0, ocanvas.width, ocanvas.height).data;
+  octx.filter = 'blur(10px)';
+  // Get image data after drawing
+  var data = octx.getImageData(0, 0, ocanvas.width, ocanvas.height).data;
+  
+
+  // var data = imageDataRBGA(data)
+
+  // var data = adjustWhiteBalance(data)
+
+
+  // Perform skin detection (assuming skinDetection function returns a valid mask)
+  const skinmask = skinDetection(new ImageData(data, ocanvas.width, ocanvas.height));
+
+  // Iterate through mask data and apply blurring logic
+  for (let i = 0; i < maskdata.length; i += 4) {
+    if (maskdata[i] > 2 && maskdata[i + 3] > 200) {
+      //&& skinmask[i + 3] == 20
+      maskdata[i] = 255;
+      maskdata[i + 1] = odata[i + 1];
+      maskdata[i + 2] = odata[i + 2];
+    } else {
+      maskdata[i] = odata[i];
+      maskdata[i + 1] = odata[i + 1];
+      maskdata[i + 2] = odata[i + 2];
+      maskdata[i + 3] = odata[i + 3];
+    }
+  }
+
+  // Create a new canvas for the output
+  const canvas = document.createElement("canvas");
+  canvas.width = w;   // Match the original image width
+  canvas.height = h;  // Match the original image height
+  const ctx = canvas.getContext("2d");
+
+  // Create a new ImageData object with the mask data and correct dimensions
+  const imgd = new ImageData(maskdata, w, h);
+  ctx.putImageData(imgd, 0, 0);
+
+  // Convert the canvas to a data URL and apply it to the original image
+  var dataURL = canvas.toDataURL();
+  img.src = dataURL;
+
 }
