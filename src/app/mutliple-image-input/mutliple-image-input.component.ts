@@ -88,11 +88,6 @@ export class MutlipleImageInputComponent {
 
       }
     
-      
-
-      
-
-    
     // Run inference on both models
 
     Promise.all([
@@ -141,13 +136,7 @@ export class MutlipleImageInputComponent {
 
           resolve(imageData)
 
-
-
           }
-
-        
-
-        
 
       })
   }

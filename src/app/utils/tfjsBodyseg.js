@@ -298,7 +298,7 @@ export async function multiInference(imageArray) {
     // img.src = dataURL;
 
 
-    const [ctx, img] =  loadContext()
+    const [canvas, ctx, img] =  loadContext(image)
 
 
     const h = img.height;
@@ -357,7 +357,7 @@ export async function multiBodyPose(imageArray){
 
 
 
-    const [ctx, img] =  loadContext()
+    const [canvas,ctx, img] =  loadContext(image)
 
 
     cell.appendChild(img);
@@ -425,7 +425,7 @@ async function checkInitialRuns(n){
 
 }
 
-function loadContext(){
+function loadContext(image){
 
   const img = document.createElement('img');
   const canvas = document.createElement('canvas');
@@ -438,7 +438,7 @@ function loadContext(){
   const dataURL = canvas.toDataURL();
   img.src = dataURL;
 
-  return [ctx, img]
+  return [canvas, ctx, img]
 
 
 
