@@ -286,27 +286,12 @@ export async function multiInference(imageArray) {
     const cell = document.createElement('td');
 
 
-    // const img = document.createElement('img');
-    // const canvas = document.createElement('canvas');
-    // const ctx = canvas.getContext('2d');
-
-    // canvas.height = image.height;
-    // canvas.width = image.width;
-
-    // ctx.putImageData(image, 0, 0);
-    // const dataURL = canvas.toDataURL();
-    // img.src = dataURL;
-
-
     const [canvas, ctx, img] =  loadContext(image)
 
 
     const h = img.height;
     const w = img.width;
 
-    // Optionally scale the image, if needed
-    // img.width = 600;
-    // img.height = h/w * img.width;
 
     cell.appendChild(img);
     row.appendChild(cell);
@@ -317,8 +302,7 @@ export async function multiInference(imageArray) {
       // Run inference on the image
       const people = await segmenter.segmentPeople(canvas, { multiSegmentation: false, segmentBodyParts: true });
 
-      // Extract the image data
-      // const imgData = await people[0].mask.toImageData();
+      
 
       await applyBlurring(img, people, h, w);
 
